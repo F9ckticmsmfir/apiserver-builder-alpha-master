@@ -1,0 +1,58 @@
+# Copyright 2017 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+.PHONY: all test build generate docs cmds clean cleangenerated cleandocs skeleton
+
+TESTDIR?=$(shell mktemp -d)
+
+all: test
+
+NON_INTERACTIVE_FLAG=--skip-resource=false --skip-controller=false --with-status-subresource=true
+
+test:
+	cd ${TESTDIR} && \
+	pwd && \
+	apiserver-boot init repo --domain sample.kubernetes.io --module-name=example.io && \
+	apiserver-boot create group version resource --group storage --version v1 --kind VolumeClaim $(NON_INTERACTIVE_FLAG) && \
+	apiserver-boot create group version resource --group storage --version v1 --kind SnapshotClaim $(NON_INTERACTIVE_FLAG) && \
+	apiserver-boot create group version resource --group storage --version v1 --kind Volume --non-namespaced $(NON_INTERACTIVE_FLAG) && \
+	apiserver-boot create group version resource --group storage --version v1 --kind Snapshot --non-namespaced $(NON_INTERACTIVE_FLAG) && \
+	apiserver-boot create subresource --group storage --version v1 --kind Snapshot --subresource scale --type scale && \
+	apiserver-boot create subresource --group storage --version v1 --kind Snapshot --subresource foo --type arbitrary && \
+	apiserver-boot create subresource --group storage --version v1 --kind Snapshot --subresource bar --type connector && \
+	make controller-gen && \
+	go mod tidy && \
+	make generate && \
+	go mod tidy && \
+	go vet $$(go list ./... | grep -vE '(clientset|listers|informers)_generated') && \
+	go test ./pkg/... && \
+	bash -c "find pkg/apis/ -name apiserver.local.config | xargs rm -rf"
+
+
+mod-tidy:
+	go mod tidy
+
+
+# Build docs
+docs: cleandocs build
+	apiserver-boot build docs --server bin/apiserver
+
+# Clean up functions
+clean: cleangenerated cleandocs
+
+cleangenerated: cmds
+	apiserver-boot build generated clean
+
+cleandocs: cmds
+	apiserver-boot build docs clean
